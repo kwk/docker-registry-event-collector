@@ -1,0 +1,79 @@
+{
+   "events": [
+      {
+         "id": "asdf-asdf-asdf-asdf-0",
+         "timestamp": "2006-01-02T15:04:05Z",
+         "action": "push",
+         "target": {
+            "mediaType": "application/vnd.docker.distribution.manifest.v1+json",
+            "length": 1,
+            "digest": "sha256:0123456789abcdef0",
+            "repository": "library/test",
+            "url": "http://example.com/v2/library/test/manifests/latest"
+         },
+         "request": {
+            "id": "asdfasdf",
+            "addr": "client.local",
+            "host": "registrycluster.local",
+            "method": "PUT",
+            "useragent": "test/0.1"
+         },
+         "actor": {
+            "name": "test-actor"
+         },
+         "source": {
+            "addr": "hostname.local:port"
+         }
+      },
+      {
+         "id": "asdf-asdf-asdf-asdf-1",
+         "timestamp": "2006-01-02T15:04:05Z",
+         "action": "push",
+         "target": {
+            "mediaType": "application/vnd.docker.container.image.rootfs.diff+x-gtar",
+            "length": 2,
+            "digest": "tarsum.v2+sha256:0123456789abcdef1",
+            "repository": "library/test",
+            "url": "http://example.com/v2/library/test/manifests/latest"
+         },
+         "request": {
+            "id": "asdfasdf",
+            "addr": "client.local",
+            "host": "registrycluster.local",
+            "method": "PUT",
+            "useragent": "test/0.1"
+         },
+         "actor": {
+            "name": "test-actor"
+         },
+         "source": {
+            "addr": "hostname.local:port"
+         }
+      },
+      {
+         "id": "asdf-asdf-asdf-asdf-2",
+         "timestamp": "2006-01-02T15:04:05Z",
+         "action": "push",
+         "target": {
+            "mediaType": "application/vnd.docker.container.image.rootfs.diff+x-gtar",
+            "length": 3,
+            "digest": "tarsum.v2+sha256:0123456789abcdef2",
+            "repository": "library/test",
+            "url": "http://example.com/v2/library/test/manifests/latest"
+         },
+         "request": {
+            "id": "asdfasdf",
+            "addr": "client.local",
+            "host": "registrycluster.local",
+            "method": "PUT",
+            "useragent": "test/0.1"
+         },
+         "actor": {
+            "name": "test-actor"
+         },
+         "source": {
+            "addr": "hostname.local:port"
+         }
+      }
+   ]
+}
