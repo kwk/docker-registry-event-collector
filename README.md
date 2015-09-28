@@ -1,1 +1,1 @@
-# docker-magpie
+# docker-registry-event-collector

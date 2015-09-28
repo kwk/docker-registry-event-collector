@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/docker/distribution/notifications"
-	"github.com/kwk/docker-magpie/settings"
+	"github.com/kwk/docker-registry-event-collector/settings"
 	"gopkg.in/mgo.v2"
 )
 
