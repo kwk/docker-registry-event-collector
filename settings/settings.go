@@ -36,7 +36,7 @@ const (
 	DefaultEndpointCertKeyPath = "certs/domain.key"
 	// DefaultEndpointRoute is the default HTTP route at which the HTTP endpoint
 	// accepts post requests from the docker registry.
-	DefaultEndpointRoute = "/post-event"
+	DefaultEndpointRoute = "/events"
 )
 
 // Settings for the mongo db backend and the HTTP endpoint frontend.
@@ -131,7 +131,7 @@ func (s Settings) Print() {
 	fmt.Printf("    DB Host     = %s\n", s.DbHost)
 	fmt.Printf("    DB Port     = %d\n", s.DbPort)
 	fmt.Printf("    DB User     = %s\n", s.DbUser)
-	fmt.Printf("    DB Password = <not shown for security>\n")
+	fmt.Printf("    DB Password = <not shown for security reasons>\n")
 	fmt.Printf("    DB Name     = %s\n\n", s.DbName)
 	fmt.Printf("  Docker endpoint:\n")
 	fmt.Printf("  ----------------\n")

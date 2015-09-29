@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -9,47 +10,57 @@ import (
 	"github.com/docker/distribution/notifications"
 	"github.com/kwk/docker-registry-event-collector/settings"
 	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
-var (
+type appContext struct {
 	conf    settings.Settings
 	session *mgo.Session
 	c       string
-)
+}
 
 // The main function sets up the connection to the storage backend for
 // aggregated events (e.g. MongoDB) and fires up an HTTPs server which acts as
-// an endpoint for docker notifications. In other words, the HTTPs server
-// accepts connections on
+// an endpoint for docker notifications.
 func main() {
 
-	conf, err := conf.CreateFromCommandLineFlags()
+	ctx := &appContext{session: nil}
+
+	conf, err := ctx.conf.CreateFromCommandLineFlags()
 	if err != nil {
 		panic(err)
 	}
 	conf.Print()
+	ctx.conf = conf
 
 	// Connect to DB
 	mongoConnStr := conf.GetMongoDBConnectionString()
 
-	log.Printf("About to connect to MongoDB on %s", mongoConnStr)
+	log.Printf("About to connect to MongoDB on \"%s\".", mongoConnStr)
 	session, err := mgo.Dial(mongoConnStr)
 	if err != nil {
+		log.Print(err)
 		panic(err)
 	}
+	ctx.session = session
 	defer session.Close()
+
+	// Wait for errors on inserts and updates and for flushing changes to disk
+	session.SetSafe(&mgo.Safe{FSync: true})
+
 	//session.SetMode(mgo.Monotonic. true)
 	// err = session.DB("test").DropDatabase()
 	// if (err != nil) {
 	//   panic(err)
 	// }
 
-	// Collection people
-	c := session.DB("test").C("people")
+	// TODO: make collection configurable
+	c := ctx.session.DB(conf.DbName).C("registry-events")
 
-	// Index
+	// The repository structure shall have a uniqe key on the repository's
+	// name field
 	index := mgo.Index{
-		Key:        []string{"RepositoryName"},
+		Key:        []string{"repositoryname"},
 		Unique:     true,
 		DropDups:   true,
 		Background: true,
@@ -58,75 +69,140 @@ func main() {
 
 	err = c.EnsureIndex(index)
 	if err != nil {
+		log.Print("It looks like your mongo database in an incosinstent status. ",
+			"Make sure you have no duplicate entries for repository names.")
 		panic(err)
 	}
 
-	http.HandleFunc(conf.EndpointRoute, handler)
+	//http.HandleFunc(conf.EndpointRoute, handler)
 
 	var httpConnectionString = conf.GetEndpointConnectionString()
-	log.Printf("About to listen ond %s", httpConnectionString)
-	err = http.ListenAndServeTLS(httpConnectionString, conf.EndpointCertPath, conf.EndpointCertKeyPath, nil)
+	log.Printf("About to listen on \"%s%s\".", httpConnectionString, conf.EndpointRoute)
+
+	mux := http.NewServeMux()
+	appHandler := &appHandler{ctx: ctx}
+	//mux.Handle(conf.EndpointRoute, appHandler)
+	mux.Handle("/events", appHandler)
+
+	log.Print(appHandler)
+
+	err = http.ListenAndServeTLS(httpConnectionString, conf.EndpointCertPath, conf.EndpointCertKeyPath, mux)
+	//err = http.ListenAndServeTLS(httpConnectionString, conf.EndpointCertPath, conf.EndpointCertKeyPath, mux)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func handler(w http.ResponseWriter, req *http.Request) {
-	// A request needs to be made via POST and must have a body
-	if req.Method != "POST" || req.Body == nil {
-		w.WriteHeader(400)
+type appHandler struct {
+	ctx *appContext
+}
+
+// Our ServeHTTP method is mostly the same, and also has the ability to
+// access our *appContext's fields (session, config, etc.) as well.
+func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+
+	// The docker registry sends events to HTTP endpoints and queues them up if
+	// the endpoint refuses to accept those events. We are only interested in
+	// manifest updates, therefore we ignore all others by answering with an HTTP
+	// 200 OK. This should prevent the docker registry from getting too full.
+
+	// A request needs to be made via POST
+	if req.Method != "POST" {
+		http.Error(w, fmt.Sprintf("Ignoring request. Required method is \"POST\" but got \"%s\".\n", req.Method), http.StatusOK)
+		return
+	}
+
+	// A request must have a body.
+	if req.Body == nil {
+		http.Error(w, "Ignoring request. Required non-empty request body.\n", http.StatusOK)
 		return
 	}
 
 	// Test for correct mimetype and reject all others
-	if req.Header.Get("Content-Type") != notifications.EventsMediaType {
-		w.WriteHeader(400)
+	// Even the documentation on docker notfications says that we shouldn't be to
+	// picky about the mimetype. But we are and let the caller know this.
+	contentType := req.Header.Get("Content-Type")
+	if contentType != notifications.EventsMediaType {
+		http.Error(w, fmt.Sprintf("Ignoring request. Required mimetype is \"%s\" but got \"%s\"\n", notifications.EventsMediaType, contentType), http.StatusOK)
+		return
 	}
 
-	// Try to decode body as Docker event
+	// Try to decode body as Docker notification event
 	decoder := json.NewDecoder(req.Body)
 	var event notifications.Event
 	err := decoder.Decode(&event)
 	if err != nil {
-		w.WriteHeader(400)
-		log.Printf("Error: %s", err)
+		http.Error(w, fmt.Sprintf("Request couldn't be decoded. Error: %s\n", err), http.StatusBadRequest)
 		return
 	}
 
-	log.Println(event.Action)
-	log.Println(event.Actor.Name)
-	log.Println(event.Target.Repository)
-	log.Println(event.Timestamp)
+	// Now we can assume that "event" is a valid Docker notification event.
+	// Let's try to insert into Mongo first. If that fails due to a unique key
+	// constraint. Try to update an entry in Mongo.
+	// NOTE: We cannot use upsert because we need to *increment* some fields in
+	// case of an update and *set* some fields in case of an insert.
 
-	c := session.DB("test").C("people")
-	err = c.Insert(&RepositoryStats{
-		RepositoryName: event.Target.Repository,
-		LastPushed:     event.Timestamp,
-		FirstPushed:    event.Timestamp,
-		NumPulls:       0,
-		NumPushs:       1,
-		NumStars:       0,
-	})
+	maxs := make(bson.M)
+	mins := make(bson.M)
+	sets := make(bson.M)
+	setOnInsert := make(bson.M)
 
-	if err != nil {
-		// TODO: Maybe it's better to return HTTP 500 Error code rather than panic
-		panic(err)
+	// When a repository is first created it has no stars yet.
+	setOnInsert["numstars"] = 0
+
+	// The time in the future is used to ensure $min and $max Mongo update
+	// operators work. It's a bit of a hack but it was the simplest solution to
+	// the problem.
+	timeInFuture := time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
+	timeInPast := time.Unix(0, 0)
+
+	pullIncrement := 0
+	if event.Action == notifications.EventActionPull {
+		pullIncrement = 1
+		maxs["lastpulled"] = event.Timestamp
+		mins["firstpulled"] = event.Timestamp
+		setOnInsert["firstpushed"] = timeInFuture
+		setOnInsert["lastpushed"] = timeInPast
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte("\nThis is an example server.\n"))
+	pushIncrement := 0
+	if event.Action == notifications.EventActionPush {
+		pushIncrement = 1
+		maxs["lastpushed"] = event.Timestamp
+		mins["firstpushed"] = event.Timestamp
+		setOnInsert["firstpulled"] = timeInFuture
+		setOnInsert["lastpulled"] = timeInPast
+	}
 
-}
+	// TODO: handle "delete" action
 
-// RepositoryStats holds some statistics about a repository.
-type RepositoryStats struct {
-	RepositoryName string
-	LastPushed     time.Time
-	LastPulled     time.Time
-	FirstPushed    time.Time
-	FirstPulled    time.Time
-	NumPulls       uint
-	NumPushs       uint
-	//Actors []string
-	NumStars uint
+	// We want something like this
+	// db.people.update({"repositoryname": "hallo"}, {$set: {"repositoryname": "hallo"}, $inc: {"numpulls": 1}}, {"upsert": true})
+
+	sets["repositoryname"] = event.Target.Repository
+
+	c := ah.ctx.session.DB(ah.ctx.conf.DbName).C("registry-events")
+
+	var changeInfo *mgo.ChangeInfo
+
+	selector := bson.M{"repositoryname": event.Target.Repository, "$isolated": true}
+	update := bson.M{
+		"$set":         sets,
+		"$setOnInsert": setOnInsert,
+		"$max":         maxs,
+		"$min":         mins,
+		"$addToSet":    bson.M{"actors": event.Actor.Name},
+		"$inc": bson.M{
+			"numpushs": pushIncrement,
+			"numpulls": pullIncrement,
+		},
+	}
+	changeInfo, err = c.Upsert(selector, update)
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to store stats. Error: %s\n", err), http.StatusBadGateway)
+		return
+	}
+
+	log.Print(changeInfo)
 }

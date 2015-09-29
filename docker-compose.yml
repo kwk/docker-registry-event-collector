@@ -3,3 +3,9 @@ mongo:
     - "27017:27017"
   image: mongo
   restart: always
+
+docker-registry-event-collector:
+  build: .
+  volumes:
+    - "./certs:/go/certs:ro"
+  restart: always
