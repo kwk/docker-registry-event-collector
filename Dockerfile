@@ -4,12 +4,12 @@ FROM golang:1.4
 
 MAINTAINER "Konrad Kleine"
 
-# Fetch dependencies
-RUN go get github.com/docker/distribution/notifications
-RUN go get gopkg.in/mgo.v2
-
 # Copy the local package files to the container's workspace.
 ADD . /go/src/github.com/kwk/docker-registry-event-collector
+
+# Fetch all dependencies
+RUN cd /go/src/github.com/kwk/docker-registry-event-collector \
+    && go get
 
 # Build the docker-registry-event-collector command inside the container.
 RUN go install github.com/kwk/docker-registry-event-collector
