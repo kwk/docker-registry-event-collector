@@ -177,7 +177,7 @@ func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// TODO: handle "delete" action
 
 	// We want something like this
-	// db.people.update({"repositoryname": "hallo"}, {$set: {"repositoryname": "hallo"}, $inc: {"numpulls": 1}}, {"upsert": true})
+	// db.registry-events.update({"repositoryname": "hallo"}, {$set: {"repositoryname": "hallo"}, $inc: {"numpulls": 1}}, {"upsert": true})
 
 	sets["repositoryname"] = event.Target.Repository
 
