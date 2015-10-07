@@ -6,6 +6,4 @@ go:
 sudo: false
 
 install:
-  cd $GOPATH/src/github.com/kwk/docker-registry-event-collector \
-  && go get \
-  && go install github.com/kwk/docker-registry-event-collector
+  cd $GOPATH/src/github.com/kwk/docker-registry-event-collector && go get && go install github.com/kwk/docker-registry-event-collector
