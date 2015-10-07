@@ -117,8 +117,11 @@ might wonder if there's no `Makefile` or something. In fact, there is none!
 
 ## Tests
 
-I'm working on some test but currently there a none. Feel free to clone this
-repo and create a pull request for tests. I really appreciate any contribution.
+The translation from a JSON notification Event to an upsert (aka. update or
+insert) MongoDB command is tested for manifest events. I also test that
+layer push events are not considered to be updates and don't result in any
+MongoDB commands.
+I really appreciate any contribution.
 
 ## Build
 
@@ -133,16 +136,17 @@ To run the executable and see the options with which you can configure it do:
 
     $ ./docker-registry-event-collector -h
     Usage of ./docker-registry-event-collector:
-    -certKeyPath="certs/domain.key": Path to SSL certificate key
-    -certPath="certs/domain.crt": Path to SSL certfificate file
-    -dbHost="127.0.0.1": mongo db host
-    -dbName="docker-registry-db": mongo database name
-    -dbPassword="": mongo db password
-    -dbPort=27017: mongo db host
-    -dbUser="": mongo db username
-    -listenOnIp="0.0.0.0": On which IP to listen for notifications from a docker registry
-    -listenOnPort=10443: On which port to listen for notifications from a docker registry
-    -route="/events": HTTP route at which docker-registry events are accepted (must start with "/")
+      -certKeyPath="certs/domain.key": Path to SSL certificate key
+      -certPath="certs/domain.crt": Path to SSL certfificate file
+      -dbHost="127.0.0.1": mongo db host
+      -dbName="docker-registry-db": mongo database name
+      -dbPassword="": mongo db password
+      -dbStatsCollectionName="repository-stats": mongo database collection name
+      -dbUser="": mongo db username
+      -dpPort=27017: mongo db host
+      -listenOnIP="0.0.0.0": On which IP to listen for notifications from a docker registry
+      -listenOnPort=10443: On which port to listen for notifications from a docker registry
+      -route="/events": HTTP route at which docker-registry events are accepted (must start with "/")
 
 ### Note about certificates
 
@@ -157,6 +161,6 @@ I've setup a job to build an publish docker images for this project at the
 
 # Known issues
 
-  * The DREC currently only handles `push` and `pull` events. `delete` still
-    needs to be implemented.
+  * ~~The DREC currently only handles `push` and `pull` events. `delete` still
+    needs to be implemented.~~ (Update: delete is translated into a MongoDB remove).
   * When run from a docker container, the executable doesn't accept CLI flags.
