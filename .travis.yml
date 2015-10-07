@@ -3,6 +3,8 @@ language: go
 go:
   - 1.4
 
+sudo: false
+
 install:
   cd $GOPATH/src/github.com/kwk/docker-registry-event-collector \
   && go get \
