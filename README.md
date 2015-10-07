@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/kwk/docker-registry-event-collector.svg?branch=master)](https://travis-ci.org/kwk/docker-registry-event-collector)
+
 # Docker Registry Event Collector, or DREC
 
 ## Synopsis
