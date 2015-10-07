@@ -7,6 +7,8 @@ import (
 )
 
 // RepositoryStats is the layout for how an entry is stored in MongoDB.
+// "omitempty" means: only include the field if it's not set to the zero value
+// for the type or to empty slices or maps.
 type RepositoryStats struct {
 	ID             bson.ObjectId `bson:"_id,omitempty"`
 	RepositoryName string        `json:"repositoryname,string"`

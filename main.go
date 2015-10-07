@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/docker/distribution/notifications"
+	"github.com/kwk/docker-registry-event-collector/events"
 	"github.com/kwk/docker-registry-event-collector/settings"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
@@ -24,8 +24,10 @@ type appContext struct {
 // an endpoint for docker notifications.
 func main() {
 
+	// Create our application context
 	ctx := &appContext{session: nil}
 
+	// Load config from command line and print it
 	conf, err := ctx.conf.CreateFromCommandLineFlags()
 	if err != nil {
 		panic(err)
@@ -34,8 +36,7 @@ func main() {
 	ctx.conf = conf
 
 	// Connect to DB
-	mongoConnStr := conf.GetMongoDBConnectionString()
-
+	mongoConnStr := ctx.conf.GetMongoDBConnectionString()
 	log.Printf("About to connect to MongoDB on \"%s\".", mongoConnStr)
 	session, err := mgo.Dial(mongoConnStr)
 	if err != nil {
@@ -55,7 +56,7 @@ func main() {
 	// }
 
 	// TODO: make collection configurable
-	c := ctx.session.DB(conf.DbName).C("registry-events")
+	collection := ctx.session.DB(ctx.conf.DbName).C(ctx.conf.DbStatsCollectionName)
 
 	// The repository structure shall have a uniqe key on the repository's
 	// name field
@@ -67,38 +68,34 @@ func main() {
 		Sparse:     true,
 	}
 
-	err = c.EnsureIndex(index)
+	err = collection.EnsureIndex(index)
 	if err != nil {
 		log.Print("It looks like your mongo database in an incosinstent status. ",
 			"Make sure you have no duplicate entries for repository names.")
 		panic(err)
 	}
 
-	//http.HandleFunc(conf.EndpointRoute, handler)
-
-	var httpConnectionString = conf.GetEndpointConnectionString()
-	log.Printf("About to listen on \"%s%s\".", httpConnectionString, conf.EndpointRoute)
+	// Setup HTTP endpoint
+	var httpConnectionString = ctx.conf.GetEndpointConnectionString()
+	log.Printf("About to listen on \"%s%s\".", httpConnectionString, ctx.conf.EndpointRoute)
 
 	mux := http.NewServeMux()
 	appHandler := &appHandler{ctx: ctx}
-	//mux.Handle(conf.EndpointRoute, appHandler)
-	mux.Handle("/events", appHandler)
-
-	log.Print(appHandler)
-
-	err = http.ListenAndServeTLS(httpConnectionString, conf.EndpointCertPath, conf.EndpointCertKeyPath, mux)
-	//err = http.ListenAndServeTLS(httpConnectionString, conf.EndpointCertPath, conf.EndpointCertKeyPath, mux)
+	mux.Handle(ctx.conf.EndpointRoute, appHandler)
+	err = http.ListenAndServeTLS(httpConnectionString, ctx.conf.EndpointCertPath, ctx.conf.EndpointCertKeyPath, mux)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Print("Exiting.")
 }
 
 type appHandler struct {
 	ctx *appContext
 }
 
-// Our ServeHTTP method is mostly the same, and also has the ability to
-// access our *appContext's fields (session, config, etc.) as well.
+// ServeHTTP has the ability to access our *appContext's fields (session,
+// config, etc.) as well.
 func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// The docker registry sends events to HTTP endpoints and queues them up if
@@ -127,82 +124,52 @@ func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Try to decode body as Docker notification event
+	// Try to decode HTTP body as Docker notification envelope
 	decoder := json.NewDecoder(req.Body)
-	var event notifications.Event
-	err := decoder.Decode(&event)
+	var envelope notifications.Envelope
+	err := decoder.Decode(&envelope)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Request couldn't be decoded. Error: %s\n", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Failed to decode envelope: %s\n", err), http.StatusBadRequest)
 		return
 	}
 
-	// Now we can assume that "event" is a valid Docker notification event.
-	// Let's try to insert into Mongo first. If that fails due to a unique key
-	// constraint. Try to update an entry in Mongo.
-	// NOTE: We cannot use upsert because we need to *increment* some fields in
-	// case of an update and *set* some fields in case of an insert.
+	var collection *mgo.Collection
+	collection = ah.ctx.session.DB(ah.ctx.conf.DbName).C(ah.ctx.conf.DbStatsCollectionName)
 
-	maxs := make(bson.M)
-	mins := make(bson.M)
-	sets := make(bson.M)
-	setOnInsert := make(bson.M)
+	for index, event := range envelope.Events {
+		log.Printf("Processing event %d of %d\n", index+1, len(envelope.Events))
 
-	// When a repository is first created it has no stars yet.
-	setOnInsert["numstars"] = 0
+		// Handle all three cases: push, pull, and delete
+		if event.Action == notifications.EventActionPull || event.Action == notifications.EventActionPush {
 
-	// The time in the future is used to ensure $min and $max Mongo update
-	// operators work. It's a bit of a hack but it was the simplest solution to
-	// the problem.
-	timeInFuture := time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
-	timeInPast := time.Unix(0, 0)
+			updateBson, err := events.ProcessEventPullOrPush(&event)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to process push or pull event. Error: %s\n", err), http.StatusBadRequest)
+				return
+			}
+			changeInfo, err := collection.Upsert(bson.M{"repositoryname": event.Target.Repository, "$isolated": true}, updateBson)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to update DB. Error: %s\n", err), http.StatusBadGateway)
+				return
+			}
+			log.Printf("Number of updated documents: %d", changeInfo.Updated)
 
-	pullIncrement := 0
-	if event.Action == notifications.EventActionPull {
-		pullIncrement = 1
-		maxs["lastpulled"] = event.Timestamp
-		mins["firstpulled"] = event.Timestamp
-		setOnInsert["firstpushed"] = timeInFuture
-		setOnInsert["lastpushed"] = timeInPast
+		} else if event.Action == notifications.EventActionDelete {
+
+			err := collection.Remove(bson.M{"repositoryname": event.Target.Repository})
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to delete document from DB. Error: %s\n", err), http.StatusBadGateway)
+				return
+			}
+
+		} else {
+
+			http.Error(w, fmt.Sprintf("Invalid event action: %s\n", event.Action), http.StatusBadRequest)
+			return
+
+		}
+
 	}
 
-	pushIncrement := 0
-	if event.Action == notifications.EventActionPush {
-		pushIncrement = 1
-		maxs["lastpushed"] = event.Timestamp
-		mins["firstpushed"] = event.Timestamp
-		setOnInsert["firstpulled"] = timeInFuture
-		setOnInsert["lastpulled"] = timeInPast
-	}
-
-	// TODO: handle "delete" action
-
-	// We want something like this
-	// db.registry-events.update({"repositoryname": "hallo"}, {$set: {"repositoryname": "hallo"}, $inc: {"numpulls": 1}}, {"upsert": true})
-
-	sets["repositoryname"] = event.Target.Repository
-
-	c := ah.ctx.session.DB(ah.ctx.conf.DbName).C("registry-events")
-
-	var changeInfo *mgo.ChangeInfo
-
-	selector := bson.M{"repositoryname": event.Target.Repository, "$isolated": true}
-	update := bson.M{
-		"$set":         sets,
-		"$setOnInsert": setOnInsert,
-		"$max":         maxs,
-		"$min":         mins,
-		"$addToSet":    bson.M{"actors": event.Actor.Name},
-		"$inc": bson.M{
-			"numpushs": pushIncrement,
-			"numpulls": pullIncrement,
-		},
-	}
-	changeInfo, err = c.Upsert(selector, update)
-
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to store stats. Error: %s\n", err), http.StatusBadGateway)
-		return
-	}
-
-	log.Print(changeInfo)
+	http.Error(w, fmt.Sprintf("Done\n"), http.StatusOK)
 }
