@@ -6,11 +6,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/docker/distribution/notifications"
+	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/github.com/docker/distribution/notifications"
+	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2"
+	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
 	"github.com/kwk/docker-registry-event-collector/events"
 	"github.com/kwk/docker-registry-event-collector/settings"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
 )
 
 type appContext struct {
