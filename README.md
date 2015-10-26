@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/kwk/docker-registry-event-collector.svg?branch=master)](https://travis-ci.org/kwk/docker-registry-event-collector)
+[![Build Status](https://travis-ci.org/kwk/docker-registry-event-collector.svg?branch=master)](https://travis-ci.org/kwk/docker-registry-event-collector) [![](https://badge.imagelayers.io/konradkleine/docker-registry-event-collector:latest.svg)](https://imagelayers.io/?images=konradkleine/docker-registry-event-collector:latest 'Get your own badge on imagelayers.io')
 
 # Docker Registry Event Collector, or DREC
 
