@@ -157,7 +157,11 @@ you should definitively create your own files.
 # Docker image
 
 I've setup a job to build an publish docker images for this project at the
-[Docker Hub](https://hub.docker.com/r/konradkleine/docker-registry-event-collector/).
+[Docker Hub](https://hub.docker.com/r/konradkleine/docker-registry-event-collector/):
+
+```
+docker pull konradkleine/docker-registry-event-collector
+```
 
 # Known issues
 
