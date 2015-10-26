@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/mgo.v2/bson"
+	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
 
 	"encoding/json"
 	"testing"
 
-	"github.com/docker/distribution/notifications"
+	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/github.com/docker/distribution/notifications"
 )
 
 // TestPushEventProcessing tests how a valid docker registry push event when
