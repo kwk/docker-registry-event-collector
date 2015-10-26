@@ -167,4 +167,4 @@ docker pull konradkleine/docker-registry-event-collector
 
   * ~~The DREC currently only handles `push` and `pull` events. `delete` still
     needs to be implemented.~~ (Update: delete is translated into a MongoDB remove).
-  * When run from a docker container, the executable doesn't accept CLI flags.
+  * ~~When run from a docker container, the executable doesn't accept CLI flags.~~

@@ -8,12 +8,13 @@ MAINTAINER "Konrad Kleine"
 ADD . /go/src/github.com/kwk/docker-registry-event-collector
 
 # Fetch all dependencies
-RUN cd /go/src/github.com/kwk/docker-registry-event-collector \
-    && go get
-
 # Build the docker-registry-event-collector command inside the container.
-RUN go install github.com/kwk/docker-registry-event-collector
+# Delete files not needed.
+RUN cd /go/src/github.com/kwk/docker-registry-event-collector \
+    && go get \
+    && go install github.com/kwk/docker-registry-event-collector \
+    && rm -rf /go/src /go/pkg
 
 # Run the docker-registry-event-collector command by default when the
 # container starts.
-ENTRYPOINT /go/bin/docker-registry-event-collector
+ENTRYPOINT ["/go/bin/docker-registry-event-collector"]
