@@ -38,7 +38,7 @@ func main() {
 	// Connect to DB
 	mongoConnStr := ctx.conf.GetMongoDBConnectionString()
 	log.Printf("About to connect to MongoDB on \"%s\".", mongoConnStr)
-	session, err := mgo.Dial(mongoConnStr)
+	session, err := mgo.DialWithInfo(&DialInfo{Addrs: [ctx.conf.DbHost]}) // TODO: Complete here
 	if err != nil {
 		log.Print(err)
 		panic(err)
