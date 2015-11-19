@@ -1,0 +1,28 @@
+# Configure your server that accepts the events
+server:
+  address: "0.0.0.0"
+  port: 8443
+  route: "/events"
+  ssl:
+    cert: certs/domain.crt
+    cert_key: certs/domain.key
+
+
+# Essentially all options are described here: https://godoc.org/gopkg.in/mgo.v2#DialInfo
+dial_info:
+  # The MongoDB hostnames or IPs to connect to.
+  addrs: ["your-mongo-host-address"]
+  # The time to wait for a server to respond when first connecting and on
+  # follow up operations in the session. If timeout is zero, the call may
+  # block forever waiting for a connection to be established.
+  # (See https://golang.org/pkg/time/#ParseDuration for a format description.)
+  timeout: "30s"
+  # Database name that will be used on the MongoDB server.
+  database: "docker-registry-db"
+  # The username with which to connect to the MongoDB server.
+  user: ""
+  # Path to the text file with the password in it.
+  password_file: ""
+
+# Where to store all statistics
+collection: "registry-stats"

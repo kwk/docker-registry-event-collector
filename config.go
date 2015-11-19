@@ -1,197 +1,111 @@
-package settings
+package main
 
 import (
-	"flag"
+	"errors"
 	"fmt"
+	"github.com/golang/glog"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/yaml.v2"
+	"io/ioutil"
 	"os"
 	"strings"
+	"time"
 )
 
-const (
-	// DefaultDbHost is the default hostname or IP on which the MongoDB server
-	// runs.
-	DefaultDbHost = "127.0.0.1"
-	// DefaultDbPort is the default port on which the MongoDB server runs.
-	DefaultDbPort = 27017
-	// DefaultDbUser is the default port on which the MongoDB server runs.
-	DefaultDbUser = ""
-	// DefaultDbPassword is the default username with which to connect to
-	// the MongoDB server.
-	DefaultDbPassword = ""
-	// DefaultDbName is the default database name that is used on the MongoDB
-	// server.
-	DefaultDbName = "docker-registry-db"
-	// DefaultDbStatsCollectionName is the default name that is used to store
-	// docker repository statistics in the MongoDB.
-	DefaultDbStatsCollectionName = "repository-stats"
-
-	// DefaultEndpointListenOnIP is the default IP on which to listen for docker
-	// registry events.
-	DefaultEndpointListenOnIP = "0.0.0.0"
-	// DefaultEndpointListenOnPort is the default port on which to listen for
-	// docker registry events.
-	DefaultEndpointListenOnPort = 10443
-	// DefaultEndpointCertPath is the default path to SSL certificate with which
-	// to secure the endpoint that receices docker events.
-	DefaultEndpointCertPath = "certs/domain.crt"
-	// DefaultEndpointCertKeyPath is the default path the SSL key that is used in
-	// conjunction with the SSL certificate.
-	DefaultEndpointCertKeyPath = "certs/domain.key"
-	// DefaultEndpointRoute is the default HTTP route at which the HTTP endpoint
-	// accepts post requests from the docker registry.
-	DefaultEndpointRoute = "/events"
-)
-
-// Names for command line arguments (specified here to be used in various places)
-const (
-	dbHost                = "dbHost"
-	dbPort                = "dpPort"
-	dbUser                = "dbUser"
-	dbPassword            = "dbPassword"
-	dbName                = "dbName"
-	dbStatsCollectionName = "dbStatsCollectionName"
-	listenOnIP            = "listenOnIP"
-	listenOnPort          = "listenOnPort"
-	certPath              = "certPath"
-	certKeyPath           = "certKeyPath"
-	route                 = "route"
-)
-
-// Settings for the mongo db backend and the HTTP endpoint frontend.
-type Settings struct {
-	// DbHost is the MongoDB hostname or IP used to connect to.
-	DbHost string
-	// DbPort is the MongoDB port to connect to.
-	DbPort uint
-	// DbUser is the username with which to connect to the MongoDB server.
-	DbUser string
-	// DbPassword is the password with which to connect to the MongoDB server.
-	DbPassword string
-	// DbName is the database name that will be used on the MongoDB server.
-	DbName string
-	// DbStatsCollectionName is the name that is used to store docker repository
-	// statistics in the MongoDB.
-	DbStatsCollectionName string
-
-	// EndpointListenOnIP is the IP on which to listen for docker registry events.
-	EndpointListenOnIP string
-	// EndpointListenOnPort is the port on which to listen for docker registry
-	// events.
-	EndpointListenOnPort uint
-	// EndpointCertPath is the filepath to the SSL certificate with which the HTTP
-	// server will be secured to accept docker registry events.
-	EndpointCertPath string
-	// EndpointCertKeyPath is used in conjunction with EndpointCertPath.
-	EndpointCertKeyPath string
-	// EndpointRoute is the HTTP route at which the HTTP endpoint accepts post
-	// requests from the docker registry.
-	EndpointRoute string
+// Config stores all the configuration represented in a config.yml
+type Config struct {
+	DialInfo   MongoDialConfig `yaml:"dial_info,omitempty"`
+	Collection string          `yaml:"collection,omitempty"`
+	Server     ServerConfig    `yaml:"server,omitempty"`
 }
 
-// GetMongoDBConnectionString builds a connection string for the mongo backend
-// and returns it to you for your convenience. Depending on whether a username
-// or passoword is given, this string will be included in the connection string.
-func (s Settings) GetMongoDBConnectionString() string {
-	var mongoConnStr string
-	if s.DbUser != "" && s.DbPassword != "" {
-		mongoConnStr = fmt.Sprintf("mongodb://%s:%s@%s:%d/%s",
-			s.DbUser, s.DbPassword, s.DbHost, s.DbPort, s.DbName)
-	} else {
-		mongoConnStr = fmt.Sprintf("mongodb://%s:%d/%s", s.DbHost, s.DbPort, s.DbName)
-	}
-	return mongoConnStr
+// MongoDialConfig stores how we connect to the MongoDB server. In addition to
+// the regular dial info we also provide another field to point to a password
+// file.
+type MongoDialConfig struct {
+	mgo.DialInfo `yaml:",inline"`
+	PasswordFile string `yaml:"password_file,omitempty"`
+}
+
+// ServerConfig stores information on how to configure the server accepting
+// events from the registry.
+type ServerConfig struct {
+	Address string    `yaml:"address,omitempty"`
+	Port    uint      `yaml:"port,omitempty"`
+	Route   string    `yaml:"route,omitempty"`
+	Ssl     SslConfig `yaml:"ssl,omitempty"`
+}
+
+// SslConfig stores some information about certificates and may be extended in
+// the future
+type SslConfig struct {
+	Cert    string `yaml:"cert,omitempty"`     // path to certificate file in PEM format
+	CertKey string `yaml:"cert_key,omitempty"` // path to certificate key file in PEM format
 }
 
 // GetEndpointConnectionString builds and returns a string with the IP and port
 // separated by a colon. Nothing special but anyway.
-func (s Settings) GetEndpointConnectionString() string {
-	return fmt.Sprintf("%s:%d", s.EndpointListenOnIP, s.EndpointListenOnPort)
+func (s Config) GetEndpointConnectionString() string {
+	return fmt.Sprintf("%s:%d", s.Server.Address, s.Server.Port)
 }
 
-// CreateFromCommandLineFlags parses all flags from the command line and returns
+// LoadConfig parses all flags from the command line and returns
 // an initialized Settings object and an error object if any. For instance if it
 // cannot find the SSL certificate file or the SSL key file it will set the
 // returned error appropriately.
-// TODO: (kwk) consider returning a Settings pointer instead of an object
-func (Settings) CreateFromCommandLineFlags() (Settings, error) {
-	var s Settings
+func LoadConfig(path string) (*Config, error) {
+	c := &Config{}
+	contents, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read config %s: %s", path, err)
+	}
+	if err = yaml.Unmarshal(contents, c); err != nil {
+		return nil, fmt.Errorf("Failed to parse config: %s", err)
+	}
+	if err = validate(c); err != nil {
+		return nil, fmt.Errorf("Invalid config: %s", err)
+	}
+	printConfig(c, "Loaded this configuration:\n")
+	return c, nil
+}
 
-	// Parse command line arguments
-	flag.StringVar(&s.DbHost, dbHost, DefaultDbHost, "mongo db host")
-	flag.UintVar(&s.DbPort, dbPort, DefaultDbPort, "mongo db host")
-	flag.StringVar(&s.DbUser, dbUser, DefaultDbUser, "mongo db username")
-	flag.StringVar(&s.DbPassword, dbPassword, DefaultDbPassword, "mongo db password")
-	flag.StringVar(&s.DbName, dbName, DefaultDbName, "mongo database name")
-	flag.StringVar(&s.DbStatsCollectionName, dbStatsCollectionName, DefaultDbStatsCollectionName, "mongo database collection name")
-	flag.StringVar(&s.EndpointListenOnIP, listenOnIP, DefaultEndpointListenOnIP, "On which IP to listen for notifications from a docker registry")
-	flag.UintVar(&s.EndpointListenOnPort, listenOnPort, DefaultEndpointListenOnPort, "On which port to listen for notifications from a docker registry")
-	flag.StringVar(&s.EndpointCertPath, certPath, DefaultEndpointCertPath, "Path to SSL certfificate file")
-	flag.StringVar(&s.EndpointCertKeyPath, certKeyPath, DefaultEndpointCertKeyPath, "Path to SSL certificate key")
-	flag.StringVar(&s.EndpointRoute, route, DefaultEndpointRoute, "HTTP route at which docker-registry events are accepted (must start with \"/\")")
-	flag.Parse()
-
-	if s.DbHost == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider: %s\n", dbHost, DefaultDbHost)
-	}
-	if s.DbPort <= 0 {
-		return s, fmt.Errorf("%s must not be less than or equal to zero. Consider %d\n", dbPort, DefaultDbPort)
-	}
-	if s.DbName == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider: %s\n", dbName, DefaultDbName)
-	}
-	if s.DbStatsCollectionName == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider %s\n", dbStatsCollectionName, DefaultDbStatsCollectionName)
+func validate(c *Config) error {
+	if len(c.DialInfo.Addrs) == 0 {
+		return fmt.Errorf("dial_info.addrs must not be empty")
 	}
 
-	if s.EndpointListenOnIP == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider %s\n", listenOnIP, DefaultEndpointListenOnIP)
+	if c.DialInfo.DialInfo.Timeout == 0 {
+		c.DialInfo.DialInfo.Timeout = 10 * time.Second
 	}
-	if s.EndpointListenOnPort <= 0 {
-		return s, fmt.Errorf("%s must not be less than or equal to zero. Consider %d\n", listenOnPort, DefaultEndpointListenOnPort)
+
+	if c.DialInfo.DialInfo.Database == "" {
+		return errors.New("dial_info.database is required")
 	}
-	if s.EndpointCertPath == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider %s\n", certPath, DefaultEndpointCertPath)
-	}
-	if s.EndpointCertKeyPath == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider %s\n", certKeyPath, DefaultEndpointCertKeyPath)
-	}
-	if s.EndpointRoute == "" {
-		return s, fmt.Errorf("%s must not be empty. Consider %s\n", route, DefaultEndpointRoute)
+	if c.Collection == "" {
+		return errors.New("collection is required")
 	}
 
 	// Check if certificate and key file exist
-	if _, err := os.Stat(s.EndpointCertPath); os.IsNotExist(err) {
-		return s, fmt.Errorf("(%s): Failed to find certificate file \"%s\": %s", certPath, s.EndpointCertPath, err)
+	if _, err := os.Stat(c.Server.Ssl.Cert); os.IsNotExist(err) {
+		return fmt.Errorf("Failed to find certificate file (server.ssl.cert) \"%s\": %s", c.Server.Ssl.Cert, err)
 	}
-	if _, err := os.Stat(s.EndpointCertKeyPath); os.IsNotExist(err) {
-		return s, fmt.Errorf("(%s): Failed to find certificate key file \"%s\": %s", certKeyPath, s.EndpointCertKeyPath, err)
+	if _, err := os.Stat(c.Server.Ssl.CertKey); os.IsNotExist(err) {
+		return fmt.Errorf("Failed to find certificate key file (server.ssl.cert_key) \"%s\": %s", c.Server.Ssl.CertKey, err)
 	}
 
 	// Check if HTTP route begins with /
-	if s.EndpointRoute == "" || !strings.HasPrefix(s.EndpointRoute, "/") {
-		return s, fmt.Errorf("(%s): HTTP route must start with /: \"%s\"", route, s.EndpointRoute)
+	if c.Server.Route == "" || !strings.HasPrefix(c.Server.Route, "/") {
+		return fmt.Errorf("HTTP route (server.route) must start with /: \"%s\"", c.Server.Route)
 	}
 
-	return s, nil
+	return nil
 }
 
-// Print all settings values in a nicely formatted way.
-func (s Settings) Print() {
-	fmt.Printf("Settings:\n")
-	fmt.Printf("=========\n\n")
-	fmt.Printf("  MongoDB:\n")
-	fmt.Printf("  ---------\n")
-	fmt.Printf("    Host                  = %s\n", s.DbHost)
-	fmt.Printf("    Port                  = %d\n", s.DbPort)
-	fmt.Printf("    User                  = %s\n", s.DbUser)
-	fmt.Printf("    Password              = <not shown for security reasons>\n")
-	fmt.Printf("    Name                  = %s\n", s.DbName)
-	fmt.Printf("    Stats Collection Name = %s\n\n", s.DbStatsCollectionName)
-	fmt.Printf("  Docker HTTP notifications/events endpoint:\n")
-	fmt.Printf("  ------------------------------------------\n")
-	fmt.Printf("    IP                    = %s\n", s.EndpointListenOnIP)
-	fmt.Printf("    Port                  = %d\n", s.EndpointListenOnPort)
-	fmt.Printf("    Certificate path      = %s\n", s.EndpointCertPath)
-	fmt.Printf("    Certificate key path  = %s\n", s.EndpointCertKeyPath)
-	fmt.Printf("    HTTP route            = %s\n\n", s.EndpointRoute)
+func printConfig(c *Config, msg string) {
+	/*d, err := yaml.Marshal(c)
+	if err != nil {
+		glog.Fatalf("error: %v", err)
+	}
+	glog.Info(msg + "\n------\n" + string(d) + "------\n")*/
+	glog.Info(msg)
 }

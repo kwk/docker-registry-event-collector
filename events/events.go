@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/github.com/docker/distribution/manifest/schema1"
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/github.com/docker/distribution/notifications"
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
+	"github.com/docker/distribution/manifest/schema1"
+	"github.com/docker/distribution/notifications"
+	"gopkg.in/mgo.v2/bson"
 )
 
 // ProcessEventPullOrPush returns a key->value map (bson.M) that can be

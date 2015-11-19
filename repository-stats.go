@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
+	"gopkg.in/mgo.v2/bson"
 )
 
 // RepositoryStats is the layout for how an entry is stored in MongoDB.
