@@ -6,6 +6,13 @@ mongo:
 
 docker-registry-event-collector:
   build: .
+  ports:
+    # Adjust to match config.yml
+    - "8443:8443"
+  links:
+    - mongo:your-mongo-host-address
   volumes:
     - "./certs:/go/certs:ro"
+    - "./config.yml:/config.yml:ro"
   restart: always
+  command: -v=4 -logtostderr=true /config.yml

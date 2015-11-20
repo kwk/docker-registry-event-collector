@@ -6,57 +6,63 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/github.com/docker/distribution/notifications"
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2"
-	"github.com/kwk/docker-registry-event-collector/Godeps/_workspace/src/gopkg.in/mgo.v2/bson"
-	"github.com/kwk/docker-registry-event-collector/events"
-	"github.com/kwk/docker-registry-event-collector/settings"
+	"github.com/docker/distribution/notifications"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+
+	"flag"
+	"github.com/golang/glog"
+	"io/ioutil"
+	"math/rand"
+	"strings"
+	"time"
 )
 
-type appContext struct {
-	conf    settings.Settings
-	session *mgo.Session
+// AppContext holds all relevant options needed in various places of the app
+type AppContext struct {
+	Config  *Config
+	Session *mgo.Session
 	c       string
+}
+
+// NewAppContext creates an empty application context object
+func NewAppContext() (*AppContext, error) {
+	return &AppContext{Session: nil}, nil
 }
 
 // The main function sets up the connection to the storage backend for
 // aggregated events (e.g. MongoDB) and fires up an HTTPs server which acts as
 // an endpoint for docker notifications.
 func main() {
+	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
+	glog.CopyStandardLogTo("INFO")
 
 	// Create our application context
-	ctx := &appContext{session: nil}
+	ctx, _ := NewAppContext()
 
-	// Load config from command line and print it
-	conf, err := ctx.conf.CreateFromCommandLineFlags()
-	if err != nil {
-		panic(err)
+	// Load config file given by first argument
+	configFilePath := flag.Arg(0)
+	if configFilePath == "" {
+		glog.Exit("Config file not specified")
 	}
-	conf.Print()
-	ctx.conf = conf
+	c, err := LoadConfig(configFilePath)
+	if err != nil {
+		glog.Exit(err)
+	}
+	ctx.Config = c
 
-	// Connect to DB
-	mongoConnStr := ctx.conf.GetMongoDBConnectionString()
-	log.Printf("About to connect to MongoDB on \"%s\".", mongoConnStr)
-	session, err := mgo.Dial(mongoConnStr)
+	// Connect to MongoDB
+	session, err := createMongoDbSession(c)
 	if err != nil {
-		log.Print(err)
-		panic(err)
+		glog.Exit(err)
 	}
-	ctx.session = session
 	defer session.Close()
+	ctx.Session = session
 
 	// Wait for errors on inserts and updates and for flushing changes to disk
 	session.SetSafe(&mgo.Safe{FSync: true})
-
-	//session.SetMode(mgo.Monotonic. true)
-	// err = session.DB("test").DropDatabase()
-	// if (err != nil) {
-	//   panic(err)
-	// }
-
-	// TODO: make collection configurable
-	collection := ctx.session.DB(ctx.conf.DbName).C(ctx.conf.DbStatsCollectionName)
+	collection := ctx.Session.DB(ctx.Config.DialInfo.DialInfo.Database).C(ctx.Config.Collection)
 
 	// The repository structure shall have a uniqe key on the repository's
 	// name field
@@ -68,30 +74,47 @@ func main() {
 		Sparse:     true,
 	}
 
-	err = collection.EnsureIndex(index)
-	if err != nil {
-		log.Print("It looks like your mongo database in an incosinstent status. ",
+	if err = collection.EnsureIndex(index); err != nil {
+		glog.Exitf("It looks like your mongo database is incosinstent. ",
 			"Make sure you have no duplicate entries for repository names.")
-		panic(err)
 	}
 
 	// Setup HTTP endpoint
-	var httpConnectionString = ctx.conf.GetEndpointConnectionString()
-	log.Printf("About to listen on \"%s%s\".", httpConnectionString, ctx.conf.EndpointRoute)
+	var httpConnectionString = ctx.Config.GetEndpointConnectionString()
+	glog.Infof("About to listen on \"%s%s\".", httpConnectionString, ctx.Config.Server.Route)
 
 	mux := http.NewServeMux()
 	appHandler := &appHandler{ctx: ctx}
-	mux.Handle(ctx.conf.EndpointRoute, appHandler)
-	err = http.ListenAndServeTLS(httpConnectionString, ctx.conf.EndpointCertPath, ctx.conf.EndpointCertKeyPath, mux)
+	mux.Handle(ctx.Config.Server.Route, appHandler)
+	err = http.ListenAndServeTLS(httpConnectionString, ctx.Config.Server.Ssl.Cert, ctx.Config.Server.Ssl.CertKey, mux)
 	if err != nil {
-		log.Fatal(err)
+		glog.Exit(err)
 	}
 
-	log.Print("Exiting.")
+	glog.Info("Exiting.")
+}
+
+func createMongoDbSession(c *Config) (*mgo.Session, error) {
+	// Connect to MongoDB
+	if c.DialInfo.PasswordFile != "" {
+		passBuf, err := ioutil.ReadFile(c.DialInfo.PasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read password file \"%s\": %s", c.DialInfo.PasswordFile, err)
+		}
+		c.DialInfo.DialInfo.Password = strings.TrimSpace(string(passBuf))
+	}
+
+	glog.V(2).Infof("Creating MongoDB session (operation timeout %s)", c.DialInfo.DialInfo.Timeout)
+	session, err := mgo.DialWithInfo(&c.DialInfo.DialInfo)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create MongoDB session: %s", err)
+	}
+
+	return session, nil
 }
 
 type appHandler struct {
-	ctx *appContext
+	ctx *AppContext
 }
 
 // ServeHTTP has the ability to access our *appContext's fields (session,
@@ -134,15 +157,15 @@ func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	var collection *mgo.Collection
-	collection = ah.ctx.session.DB(ah.ctx.conf.DbName).C(ah.ctx.conf.DbStatsCollectionName)
+	collection = ah.ctx.Session.DB(ah.ctx.Config.DialInfo.DialInfo.Database).C(ah.ctx.Config.Collection)
 
 	for index, event := range envelope.Events {
-		log.Printf("Processing event %d of %d\n", index+1, len(envelope.Events))
+		glog.V(2).Infof("Processing event %d of %d\n", index+1, len(envelope.Events))
 
 		// Handle all three cases: push, pull, and delete
 		if event.Action == notifications.EventActionPull || event.Action == notifications.EventActionPush {
 
-			updateBson, err := events.ProcessEventPullOrPush(&event)
+			updateBson, err := ProcessEventPullOrPush(&event)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Failed to process push or pull event. Error: %s\n", err), http.StatusBadRequest)
 				return

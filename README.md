@@ -12,7 +12,7 @@ Here's an overview of the architecture:
 
 ### History
 
-Docker is a fantastic tool, there's no doubt about it. One of the main reasons
+Docker is a fantastic tool, there's no doubt about that. One of the main reasons
 for it's success is that is provides a central place from which everybody can
 grab pre-built images for famous tools or Linux distribution. This place is
 called the [Docker Hub](https://hub.docker.com).
@@ -132,21 +132,9 @@ seconds.
 
 ## Run
 
-To run the executable and see the options with which you can configure it do:
+Tweak the accompanied `config.yml` file to your needs and then run:
 
-    $ ./docker-registry-event-collector -h
-    Usage of ./docker-registry-event-collector:
-      -certKeyPath="certs/domain.key": Path to SSL certificate key
-      -certPath="certs/domain.crt": Path to SSL certfificate file
-      -dbHost="127.0.0.1": mongo db host
-      -dbName="docker-registry-db": mongo database name
-      -dbPassword="": mongo db password
-      -dbStatsCollectionName="repository-stats": mongo database collection name
-      -dbUser="": mongo db username
-      -dpPort=27017: mongo db host
-      -listenOnIP="0.0.0.0": On which IP to listen for notifications from a docker registry
-      -listenOnPort=10443: On which port to listen for notifications from a docker registry
-      -route="/events": HTTP route at which docker-registry events are accepted (must start with "/")
+    $ ./docker-registry-event-collector ./config.yml
 
 ### Note about certificates
 
