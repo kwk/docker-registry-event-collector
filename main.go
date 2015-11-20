@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/docker/distribution/notifications"
-	"github.com/kwk/docker-registry-event-collector/events"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 
@@ -54,17 +53,7 @@ func main() {
 	ctx.Config = c
 
 	// Connect to MongoDB
-	// Read in the password (if any)
-	if ctx.Config.DialInfo.PasswordFile != "" {
-		passBuf, err := ioutil.ReadFile(ctx.Config.DialInfo.PasswordFile)
-		if err != nil {
-			glog.Exitf(`Failed to read password file "%s": %s`, ctx.Config.DialInfo.PasswordFile, err)
-		}
-		ctx.Config.DialInfo.DialInfo.Password = strings.TrimSpace(string(passBuf))
-	}
-
-	glog.V(2).Infof("Creating MongoDB session (operation timeout %s)", ctx.Config.DialInfo.DialInfo.Timeout)
-	session, err := mgo.DialWithInfo(&ctx.Config.DialInfo.DialInfo)
+	session, err := createMongoDbSession(c)
 	if err != nil {
 		glog.Exit(err)
 	}
@@ -73,7 +62,6 @@ func main() {
 
 	// Wait for errors on inserts and updates and for flushing changes to disk
 	session.SetSafe(&mgo.Safe{FSync: true})
-
 	collection := ctx.Session.DB(ctx.Config.DialInfo.DialInfo.Database).C(ctx.Config.Collection)
 
 	// The repository structure shall have a uniqe key on the repository's
@@ -86,8 +74,7 @@ func main() {
 		Sparse:     true,
 	}
 
-	err = collection.EnsureIndex(index)
-	if err != nil {
+	if err = collection.EnsureIndex(index); err != nil {
 		glog.Exitf("It looks like your mongo database is incosinstent. ",
 			"Make sure you have no duplicate entries for repository names.")
 	}
@@ -105,6 +92,25 @@ func main() {
 	}
 
 	glog.Info("Exiting.")
+}
+
+func createMongoDbSession(c *Config) (*mgo.Session, error) {
+	// Connect to MongoDB
+	if c.DialInfo.PasswordFile != "" {
+		passBuf, err := ioutil.ReadFile(c.DialInfo.PasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to read password file \"%s\": %s", c.DialInfo.PasswordFile, err)
+		}
+		c.DialInfo.DialInfo.Password = strings.TrimSpace(string(passBuf))
+	}
+
+	glog.V(2).Infof("Creating MongoDB session (operation timeout %s)", c.DialInfo.DialInfo.Timeout)
+	session, err := mgo.DialWithInfo(&c.DialInfo.DialInfo)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create MongoDB session: %s", err)
+	}
+
+	return session, nil
 }
 
 type appHandler struct {
@@ -159,7 +165,7 @@ func (ah appHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// Handle all three cases: push, pull, and delete
 		if event.Action == notifications.EventActionPull || event.Action == notifications.EventActionPush {
 
-			updateBson, err := events.ProcessEventPullOrPush(&event)
+			updateBson, err := ProcessEventPullOrPush(&event)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("Failed to process push or pull event. Error: %s\n", err), http.StatusBadRequest)
 				return
