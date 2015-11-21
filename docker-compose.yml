@@ -1,3 +1,12 @@
+# This docker-compose file sets up a database container (MongoDB)
+# and the event collector container. The latter is linked to the
+# MongoDB container.
+# Notice that the name "your-mongo-host-address" is actually
+# configured inside the config.yml. If you have your own MongoDB
+# server you should remove the link from the event collector
+# container and configure the config.yml so that it points to your
+# MongoDB container.
+
 mongo:
   ports:
     - "27017:27017"
