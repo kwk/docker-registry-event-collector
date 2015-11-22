@@ -150,6 +150,9 @@ I've setup a job to build an publish docker images for this project at the
 ```
 docker pull konradkleine/docker-registry-event-collector
 ```
+# Plans
+
+ - [] REST API to query the stats
 
 # Known issues
 
