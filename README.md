@@ -152,7 +152,7 @@ docker pull konradkleine/docker-registry-event-collector
 ```
 # Plans
 
- - [] REST API to query the stats
+ - [ ] REST API to query the stats
 
 # Known issues
 
